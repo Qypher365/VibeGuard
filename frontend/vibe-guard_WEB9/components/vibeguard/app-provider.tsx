@@ -97,6 +97,8 @@ export function VibeGuardProvider({ children }: { children: ReactNode }) {
 
   const handleRun = useCallback(async () => {
     setLoading(true)
+    setScan(null)
+    setConfirmedIds(new Set())
     try {
       let liveResult: any = null
       try {
@@ -157,7 +159,7 @@ export function VibeGuardProvider({ children }: { children: ReactNode }) {
           explanation: flag.explanation || flag.description || flag.message || '',
           suggestedFix: flag.suggestedFix || flag.fix || flag.suggestion || 'Review flagged line for potential risks.',
           file: flag.file || fileName || 'test.js',
-        }))
+        })).filter((flag: any) => Number(flag.line || 1) <= (code || '').split('\n').length)
 
         const normalizedSummary = liveResult.summary || {
           totalFlags: normalizedFlags.length,
@@ -165,6 +167,18 @@ export function VibeGuardProvider({ children }: { children: ReactNode }) {
           high: liveResult.severityCounts?.HIGH ?? 0,
           medium: liveResult.severityCounts?.MEDIUM ?? 0,
           low: liveResult.severityCounts?.LOW ?? 0,
+        }
+
+        const calcCrit = normalizedFlags.filter((f: any) => f.severity === 'CRITICAL').length
+        const calcHigh = normalizedFlags.filter((f: any) => f.severity === 'HIGH').length
+        const calcMed = normalizedFlags.filter((f: any) => f.severity === 'MEDIUM').length
+        const calcLow = normalizedFlags.filter((f: any) => f.severity === 'LOW').length
+        if (normalizedSummary) {
+          normalizedSummary.totalFlags = normalizedFlags.length
+          normalizedSummary.critical = (normalizedSummary.critical && normalizedSummary.critical > 0) ? normalizedSummary.critical : calcCrit
+          normalizedSummary.high = (normalizedSummary.high && normalizedSummary.high > 0) ? normalizedSummary.high : calcHigh
+          normalizedSummary.medium = (normalizedSummary.medium && normalizedSummary.medium > 0) ? normalizedSummary.medium : calcMed
+          normalizedSummary.low = (normalizedSummary.low && normalizedSummary.low > 0) ? normalizedSummary.low : calcLow
         }
 
         const normalizedResult: ScanResult = {
