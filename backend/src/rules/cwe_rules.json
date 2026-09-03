@@ -1,0 +1,85 @@
+{
+  "version": "1.0",
+  "rules": [
+    {
+      "id": "CWE-89",
+      "name": "SQL Injection",
+      "category": "SQL Injection",
+      "severity": "HIGH",
+      "description": "Improper neutralization of special elements used in an SQL command can allow attacker-controlled input to modify a database query.",
+      "guidance": "Use parameterized queries or prepared statements instead of building SQL queries through string concatenation."
+    },
+    {
+      "id": "CWE-78",
+      "name": "OS Command Injection",
+      "category": "Command Injection",
+      "severity": "CRITICAL",
+      "description": "External input is incorporated into an operating system command without sufficient validation or neutralization.",
+      "guidance": "Avoid shell execution with untrusted input. Prefer safe APIs and strict allowlists for required arguments."
+    },
+    {
+      "id": "CWE-22",
+      "name": "Path Traversal",
+      "category": "Path Traversal",
+      "severity": "HIGH",
+      "description": "External input can influence a filesystem path and potentially allow access outside the intended directory.",
+      "guidance": "Validate paths, restrict access to an intended base directory, and safely resolve and verify the resulting path."
+    },
+    {
+      "id": "CWE-918",
+      "name": "Server-Side Request Forgery",
+      "category": "SSRF",
+      "severity": "HIGH",
+      "description": "A server makes network requests using attacker-controlled input, potentially allowing access to internal or restricted resources.",
+      "guidance": "Validate and restrict destination URLs, use allowlists where possible, and block access to internal network ranges."
+    },
+    {
+      "id": "CWE-502",
+      "name": "Deserialization of Untrusted Data",
+      "category": "Insecure Deserialization",
+      "severity": "HIGH",
+      "description": "Untrusted or attacker-controlled serialized data is deserialized in an unsafe way.",
+      "guidance": "Avoid deserializing untrusted data when possible. Use safe serialization formats and validate data before processing."
+    },
+    {
+      "id": "CWE-287",
+      "name": "Improper Authentication",
+      "category": "Authentication",
+      "severity": "HIGH",
+      "description": "The application does not properly verify the identity of a user or system before granting access.",
+      "guidance": "Use established authentication mechanisms and ensure identity verification occurs before protected operations."
+    },
+    {
+      "id": "CWE-862",
+      "name": "Missing Authorization",
+      "category": "Authorization",
+      "severity": "HIGH",
+      "description": "The application does not properly verify whether an authenticated user is authorized to perform an operation.",
+      "guidance": "Perform server-side authorization checks for every protected resource and sensitive operation."
+    },
+    {
+      "id": "CWE-352",
+      "name": "Cross-Site Request Forgery",
+      "category": "CSRF",
+      "severity": "MEDIUM",
+      "description": "A web application accepts state-changing requests without adequately verifying that the request was intentionally made by the authenticated user.",
+      "guidance": "Use CSRF tokens or equivalent protections and configure appropriate cookie security attributes."
+    },
+    {
+      "id": "CWE-200",
+      "name": "Exposure of Sensitive Information",
+      "category": "Information Exposure",
+      "severity": "MEDIUM",
+      "description": "The application exposes sensitive information through responses, logs, errors, or other externally accessible outputs.",
+      "guidance": "Return only necessary information and avoid exposing secrets, internal paths, stack traces, or sensitive application details."
+    },
+    {
+      "id": "CWE-400",
+      "name": "Uncontrolled Resource Consumption",
+      "category": "Resource Exhaustion",
+      "severity": "MEDIUM",
+      "description": "An application consumes excessive resources because input size, processing time, or resource usage is not adequately controlled.",
+      "guidance": "Apply appropriate input limits, timeouts, quotas, pagination, and resource controls."
+    }
+  ]
+}
