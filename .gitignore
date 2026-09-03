@@ -1,0 +1,9 @@
+# Sensitive keys
+.env
+.env*.local
+
+# Dependencies & Builds
+node_modules/
+.next/
+dist/
+out/
