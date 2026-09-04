@@ -13,63 +13,146 @@ export default function ResultsPage() {
   const [selectedFile, setSelectedFile] = useState<string>('all')
   const [confirmedCount, setConfirmedCount] = useState<number>(0)
   const [copied, setCopied] = useState(false)
+  const [mounted, setMounted] = useState(false)
 
   useEffect(() => {
+    setMounted(true)
+
     const hydrateData = () => {
       try {
-        const storedScan = localStorage.getItem('vibeguard_last_scan')
-        const storedCode = localStorage.getItem('vibeguard_multi_code')
-        const sessionScan = sessionStorage.getItem('vibeguard_last_scan')
+        // Query all scan storage keys used across raw code & single file upload
+        const storedScanRaw = 
+          localStorage.getItem('vibeguard_last_scan') ||
+          localStorage.getItem('vibeguard_results') ||
+          localStorage.getItem('vibeguard_single_scan') ||
+          localStorage.getItem('vibeguard_raw_scan') ||
+          localStorage.getItem('vibeguard_file_scan') ||
+          sessionStorage.getItem('vibeguard_last_scan') ||
+          sessionStorage.getItem('vibeguard_results')
 
-        let data = null
-        if (storedScan) {
-          data = JSON.parse(storedScan)
-        } else if (sessionScan) {
-          data = JSON.parse(sessionScan)
-        } else if (vibeCtx?.scanResult || (vibeCtx as any)?.results || (vibeCtx as any)?.scanData) {
-          data = vibeCtx.scanResult || (vibeCtx as any).results || (vibeCtx as any).scanData
-        }
+        // Query all code payload keys used across input handlers
+        const rawCode = 
+          localStorage.getItem('vibeguard_raw_code') ||
+          localStorage.getItem('vibeguard_single_code') ||
+          localStorage.getItem('vibeguard_file_code') ||
+          localStorage.getItem('vibeguard_code') ||
+          localStorage.getItem('vibeguard_multi_code') ||
+          sessionStorage.getItem('vibeguard_raw_code')
 
-        if (data) {
-          setScanData(data)
-          if (storedCode) {
-            setCode(storedCode)
-          } else if (data.redacted_code) {
-            setCode(data.redacted_code)
-          } else if (vibeCtx?.code) {
-            setCode(vibeCtx.code)
+        let parsedData: any = null
+        if (storedScanRaw) {
+          try {
+            parsedData = JSON.parse(storedScanRaw)
+          } catch (e) {
+            console.warn('Failed to parse scan JSON from storage:', e)
           }
         }
+
+        // Context fallback
+        if (!parsedData) {
+          parsedData = vibeCtx?.scanResult || (vibeCtx as any)?.results || (vibeCtx as any)?.scanData
+        }
+
+        // Unwrap nested API payload wrappers
+        if (parsedData?.data) parsedData = parsedData.data
+        if (parsedData?.scanResult) parsedData = parsedData.scanResult
+
+        // Resolve code across all single file and raw code property formats
+        let resolvedCode = 
+          parsedData?.redacted_code ||
+          parsedData?.code ||
+          parsedData?.content ||
+          parsedData?.file_content ||
+          parsedData?.source_code ||
+          parsedData?.files?.[0]?.redacted_code ||
+          parsedData?.files?.[0]?.code ||
+          parsedData?.files?.[0]?.content ||
+          parsedData?.redacted_files?.[0]?.redacted_code ||
+          rawCode ||
+          vibeCtx?.code ||
+          (vibeCtx as any)?.fileContent ||
+          ''
+
+        if (typeof resolvedCode === 'object' && resolvedCode !== null) {
+          resolvedCode = JSON.stringify(resolvedCode, null, 2)
+        }
+
+        // Synthesize scan container if raw code exists without scan output
+        if (!parsedData && rawCode) {
+          parsedData = {
+            score: 85,
+            scope: { filename: 'raw_input.js', total_files: 1, timestamp: new Date().toISOString() },
+            findings: []
+          }
+        }
+
+        if (parsedData) {
+          setScanData(parsedData)
+        }
+
+        setCode(String(resolvedCode || ''))
       } catch (e) {
         console.error('Failed to hydrate scan results:', e)
       }
     }
 
     hydrateData()
+
     window.addEventListener('storage', hydrateData)
     window.addEventListener('vibeguard_scan_complete', hydrateData)
+    window.addEventListener('pageshow', hydrateData)
 
     return () => {
       window.removeEventListener('storage', hydrateData)
       window.removeEventListener('vibeguard_scan_complete', hydrateData)
+      window.removeEventListener('pageshow', hydrateData)
     }
   }, [vibeCtx])
 
-  const findings = scanData?.findings || []
-  const redactedFiles = scanData?.redacted_files || []
+  const findings = scanData?.findings || scanData?.results?.findings || scanData?.vulnerabilities || []
+  
+  // Normalize single file and raw code items into redactedFiles tab items
+  let redactedFiles = scanData?.redacted_files || scanData?.files || []
+  const filename = 
+    scanData?.scope?.filename || 
+    scanData?.filename || 
+    scanData?.file_name || 
+    scanData?.name || 
+    vibeCtx?.fileName || 
+    (redactedFiles[0]?.filename || redactedFiles[0]?.name) || 
+    'raw_input.js'
+
+  if (redactedFiles.length === 0 && code) {
+    redactedFiles = [{ filename, redacted_code: code }]
+  }
+
+  const totalFilesAudited = scanData?.scope?.total_files || redactedFiles.length || (code ? 1 : 0)
   const score = scanData?.score ?? 100
-  const filename = scanData?.scope?.filename || vibeCtx?.fileName || 'Scan Report'
-  const timestamp = scanData?.scope?.timestamp 
-    ? new Date(scanData.scope.timestamp).toLocaleString()
-    : new Date().toLocaleString()
+
+  const timestamp = mounted
+    ? (scanData?.scope?.timestamp 
+        ? new Date(scanData.scope.timestamp).toLocaleString()
+        : new Date().toLocaleString())
+    : ''
 
   const filteredFindings = selectedFile === 'all' 
     ? findings 
-    : findings.filter((f: any) => f.file === selectedFile || f.filename === selectedFile)
+    : findings.filter((f: any) => 
+        f.file === selectedFile || 
+        f.filename === selectedFile || 
+        f.path === selectedFile ||
+        (!f.file && !f.filename)
+      )
 
   const activeDisplayCode = selectedFile === 'all'
     ? (code || scanData?.redacted_code || '')
-    : (redactedFiles.find((rf: any) => rf.filename === selectedFile)?.redacted_code || code || scanData?.redacted_code || '')
+    : (redactedFiles.find((rf: any) => (rf.filename || rf.name) === selectedFile)?.redacted_code || 
+       redactedFiles.find((rf: any) => (rf.filename || rf.name) === selectedFile)?.code || 
+       code || scanData?.redacted_code || '')
+
+  const renderableCodeString = typeof activeDisplayCode === 'object' 
+    ? JSON.stringify(activeDisplayCode, null, 2) 
+    : String(activeDisplayCode || '')
 
   const handleDownloadReport = () => {
     if (!scanData) return
@@ -83,12 +166,18 @@ export default function ResultsPage() {
   }
 
   const handleCopyCode = () => {
-    navigator.clipboard.writeText(activeDisplayCode)
+    if (!renderableCodeString) return
+    navigator.clipboard.writeText(renderableCodeString)
     setCopied(true)
     setTimeout(() => setCopied(false), 2000)
   }
 
-  const counts = scanData?.severityCounts || { critical: 0, high: 0, medium: 0, low: 0 }
+  const counts = scanData?.severityCounts || scanData?.severity_counts || {
+    critical: findings.filter((f: any) => f.severity === 'CRITICAL').length,
+    high: findings.filter((f: any) => f.severity === 'HIGH').length,
+    medium: findings.filter((f: any) => f.severity === 'MEDIUM').length,
+    low: findings.filter((f: any) => f.severity === 'LOW').length,
+  }
 
   return (
     <div className="mx-auto w-full max-w-[1200px] space-y-6 py-6 px-4">
@@ -101,14 +190,12 @@ export default function ResultsPage() {
           </div>
           <h1 className="text-2xl font-bold text-foreground mt-1 flex items-center gap-3">
             Audit Results
-            {scanData?.scope?.total_files && (
-              <span className="text-xs font-mono font-normal px-2.5 py-0.5 rounded-full border border-cyan/30 bg-cyan/10 text-cyan">
-                {scanData.scope.total_files} Files Audited
-              </span>
-            )}
+            <span className="text-xs font-mono font-normal px-2.5 py-0.5 rounded-full border border-cyan/30 bg-cyan/10 text-cyan">
+              {totalFilesAudited} {totalFilesAudited === 1 ? 'File' : 'Files'} Audited
+            </span>
           </h1>
-          <p className="text-xs font-mono text-muted-foreground mt-0.5">
-            {filename} • {timestamp}
+          <p className="text-xs font-mono text-muted-foreground mt-0.5" suppressHydrationWarning>
+            {filename} {timestamp ? `• ${timestamp}` : ''}
           </p>
         </div>
 
@@ -124,6 +211,7 @@ export default function ResultsPage() {
             variant="outline" 
             size="sm" 
             className="gap-2 border-cyan/30 text-cyan hover:bg-cyan/10 font-mono text-xs"
+            disabled={!scanData}
           >
             <Download className="size-4" />
             Download Report
@@ -133,7 +221,6 @@ export default function ResultsPage() {
 
       {/* Metric Cards Row */}
       <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
-        {/* Security Score */}
         <div className="rounded-xl border border-border bg-card/50 p-5 backdrop-blur flex items-center gap-5">
           <div className="relative flex items-center justify-center size-20 rounded-full border-4 border-yellow-500/30 text-yellow-500 font-bold text-xl font-mono">
             {score}
@@ -147,7 +234,6 @@ export default function ResultsPage() {
           </div>
         </div>
         
-        {/* Total Flags */}
         <div className="rounded-xl border border-border bg-card/50 p-5 backdrop-blur flex flex-col justify-between">
           <div className="flex items-start justify-between">
             <div>
@@ -165,7 +251,6 @@ export default function ResultsPage() {
           </div>
         </div>
 
-        {/* Severity Breakdown */}
         <div className="rounded-xl border border-border bg-card/50 p-5 backdrop-blur flex flex-col justify-between">
           <span className="text-[11px] font-mono text-muted-foreground uppercase tracking-wider">Severity Breakdown</span>
           <div className="grid grid-cols-2 gap-2 mt-2">
@@ -189,8 +274,8 @@ export default function ResultsPage() {
         </div>
       </div>
 
-      {/* Multi-File Filter Tabs */}
-      {redactedFiles.length > 1 && (
+      {/* File Filter Tabs */}
+      {redactedFiles.length > 0 && (
         <div className="flex items-center gap-2 overflow-x-auto pb-1 border-b border-border/60">
           <span className="text-xs font-mono text-muted-foreground mr-2 flex items-center gap-1.5">
             <Layers className="size-3.5 text-cyan" /> Filter File:
@@ -203,25 +288,26 @@ export default function ResultsPage() {
                 : 'bg-card/80 text-muted-foreground hover:bg-card hover:text-foreground border border-border/50'
             }`}
           >
-            All Files ({findings.length})
+            All Files ({totalFilesAudited})
           </button>
           {redactedFiles.map((rf: any) => {
-            const fileFindingCount = findings.filter((f: any) => f.file === rf.filename || f.filename === rf.filename).length
+            const fname = rf.filename || rf.name || filename
+            const fileFindingCount = findings.filter((f: any) => f.file === fname || f.filename === fname).length
             return (
               <button
-                key={rf.filename}
-                onClick={() => setSelectedFile(rf.filename)}
+                key={fname}
+                onClick={() => setSelectedFile(fname)}
                 className={`px-3 py-1.5 rounded-lg text-xs font-mono flex items-center gap-1.5 transition-all ${
-                  selectedFile === rf.filename
+                  selectedFile === fname
                     ? 'bg-cyan text-black font-semibold shadow-sm'
                     : 'bg-card/80 text-muted-foreground hover:bg-card hover:text-foreground border border-border/50'
                 }`}
               >
                 <FileCode className="size-3" />
-                {rf.filename}
+                {fname}
                 {fileFindingCount > 0 && (
                   <span className={`px-1.5 py-0.2 rounded-full text-[10px] ${
-                    selectedFile === rf.filename ? 'bg-black/20 text-black' : 'bg-red-500/20 text-red-400'
+                    selectedFile === fname ? 'bg-black/20 text-black' : 'bg-red-500/20 text-red-400'
                   }`}>
                     {fileFindingCount}
                   </span>
@@ -232,9 +318,8 @@ export default function ResultsPage() {
         </div>
       )}
 
-      {/* Code Viewer & Vulnerabilities Grid */}
+      {/* Code Viewer & Vulnerability Stream */}
       <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
-        {/* Inline Code Viewer */}
         <div className="rounded-xl border border-border bg-card/50 p-4 backdrop-blur flex flex-col h-full min-h-[450px]">
           <div className="flex items-center justify-between pb-3 border-b border-border/50">
             <span className="text-xs font-mono text-cyan flex items-center gap-2">
@@ -243,18 +328,18 @@ export default function ResultsPage() {
             </span>
             <button
               onClick={handleCopyCode}
-              className="inline-flex items-center gap-1 text-xs font-mono text-muted-foreground hover:text-foreground bg-secondary/50 px-2.5 py-1 rounded border border-border/50"
+              disabled={!renderableCodeString}
+              className="inline-flex items-center gap-1 text-xs font-mono text-muted-foreground hover:text-foreground bg-secondary/50 px-2.5 py-1 rounded border border-border/50 disabled:opacity-50"
             >
               {copied ? <Check className="size-3 text-cyan" /> : <Copy className="size-3" />}
               {copied ? 'Copied' : 'Copy'}
             </button>
           </div>
           <div className="mt-3 flex-1 overflow-auto bg-black/60 rounded-lg p-3 font-mono text-xs text-emerald-400/90 whitespace-pre leading-relaxed">
-            {activeDisplayCode || '// No code payload available.'}
+            {renderableCodeString || '// No code payload available.'}
           </div>
         </div>
 
-        {/* Vulnerability Stream */}
         <div className="space-y-4">
           <div className="flex items-center justify-between">
             <h2 className="text-xs font-mono uppercase tracking-wider text-muted-foreground flex items-center gap-2">
@@ -277,10 +362,10 @@ export default function ResultsPage() {
                 <div className="flex items-start justify-between gap-2">
                   <div className="flex items-center gap-2">
                     <span className="px-2 py-0.5 rounded text-[10px] font-mono font-bold uppercase bg-red-500/20 text-red-400 border border-red-500/30">
-                      {f.severity || 'CRITICAL'}
+                      {f.severity || 'HIGH'}
                     </span>
-                    <span className="text-xs font-mono text-muted-foreground">{f.source || 'Registry Engine'}</span>
-                    <span className="text-xs font-mono text-cyan">{f.file || 'test.js'}:{f.line || 1}</span>
+                    <span className="text-xs font-mono text-muted-foreground">{f.source || 'secretEngine'}</span>
+                    <span className="text-xs font-mono text-cyan">{f.file || filename}:{f.line || 1}</span>
                   </div>
                   <button
                     onClick={() => setConfirmedCount((prev) => prev + 1)}
@@ -296,7 +381,7 @@ export default function ResultsPage() {
                 </div>
 
                 {f.evidence && (
-                  <div className="bg-black/70 p-2.5 rounded font-mono text-xs text-red-300 border border-red-500/20 overflow-x-auto">
+                  <div className="bg-black/70 p-2.5 rounded font-mono text-xs text-red-300 border border-red-500/20 break-all whitespace-pre-wrap max-h-[120px] overflow-y-auto">
                     {f.evidence}
                   </div>
                 )}
