@@ -5,7 +5,6 @@ import { runRegistryScan } from './engines/registryEngine.js';
 import { semanticEngine } from './engines/semanticEngine.js';
 import { secretEngine } from './engines/secretEngine.js';
 
-// Mock matching Sameer's contract: secretEngine(code, filename)
 async function runSecretScan(code, filename) {
   try {
     const realResult = secretEngine(code, filename);
@@ -47,7 +46,6 @@ async function runSecretScan(code, filename) {
   };
 }
 
-// Safety wrapper to prevent AI API calls from hanging forever (3 minutes / 180 seconds)
 const withTimeout = (promise, ms = 10000) =>
   Promise.race([
     promise,
@@ -58,7 +56,8 @@ const withTimeout = (promise, ms = 10000) =>
 
 const app = express();
 app.use(cors());
-app.use(express.json({ limit: '10mb' }));
+app.use(express.json({ limit: '50mb' }));
+app.use(express.urlencoded({ limit: '50mb', extended: true }));
 
 app.get('/', (req, res) => {
   res.json({ status: 'VibeGuard Backend API active 🛡️' });
@@ -93,11 +92,17 @@ export async function runFullScan(filename, code) {
       .catch((err) => { console.error('  ❌ Secret Engine Error:', err.message); return { findings: [], redacted_code: code }; }),
   ]);
 
-  const findings = [
+  // Force attach file property to every finding
+  const rawFindings = [
     ...(registryRes.findings || []),
     ...(semanticRes.findings || []),
     ...(secretRes.findings || []),
   ];
+
+  const findings = rawFindings.map((f) => ({
+    ...f,
+    file: f.file || filename,
+  }));
 
   const severityCounts = {
     critical: findings.filter((f) => String(f.severity).toLowerCase() === 'critical').length,
@@ -107,7 +112,7 @@ export async function runFullScan(filename, code) {
   };
 
   const score = calculateScore(findings);
-  console.log(`[${new Date().toLocaleTimeString()}] ✨ Scan completed with ${findings.length} finding(s)`);
+  console.log(`[${new Date().toLocaleTimeString()}] ✨ Scan completed with ${findings.length} finding(s) for ${filename}`);
 
   return {
     scope: {
@@ -126,7 +131,6 @@ export async function runFullScan(filename, code) {
 app.post('/api/scan', async (req, res) => {
   const { filename, filePath, codeContent, code, files } = req.body;
 
-  // Handle Multi-file Directory Payloads
   if (Array.isArray(files) && files.length > 0) {
     try {
       console.log(`\n🔍 Multi-file scan requested for ${files.length} file(s)...`);
@@ -155,8 +159,13 @@ app.post('/api/scan', async (req, res) => {
         redacted_code: r.redacted_code,
       }));
 
+      const combinedRedactedCode = redactedFiles
+        .map((rf) => `// ==========================================\n// FILE: ${rf.filename}\n// ==========================================\n\n${rf.redacted_code}`)
+        .join('\n\n');
+
       return res.json({
         scope: {
+          filename: `Batch (${files.length} files)`,
           total_files: files.length,
           timestamp: new Date().toISOString(),
           total_findings: allFindings.length,
@@ -164,6 +173,7 @@ app.post('/api/scan', async (req, res) => {
         score: avgScore,
         score_display: `${avgScore}/100`,
         severityCounts,
+        redacted_code: combinedRedactedCode,
         redacted_files: redactedFiles,
         findings: allFindings,
       });
@@ -173,7 +183,6 @@ app.post('/api/scan', async (req, res) => {
     }
   }
 
-  // Handle Single File Payloads
   const fileToScan = filename || filePath || 'uploaded_file.js';
   const sourceCode = codeContent || code;
 
