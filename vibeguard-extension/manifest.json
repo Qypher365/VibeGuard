@@ -1,0 +1,10 @@
+{
+  "manifest_version": 3,
+  "name": "VibeGuard Security Auditor",
+  "version": "1.0",
+  "description": "Real-time AI code security auditor",
+  "action": {
+    "default_popup": "popup.html"
+  },
+  "permissions": ["activeTab", "scripting"]
+}
