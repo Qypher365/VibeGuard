@@ -33,22 +33,16 @@ const ENTROPY_CONFIDENCE = {
   general: 0.6,
 };
 
-/**
- * Masks a secret string: keeps the first 4 characters as a type hint
- * and masks the remaining characters with asterisks.
- */
 function maskSecret(str) {
-  if (!str) return '****';
+  if (!str || typeof str !== 'string') return '****';
   if (str.length <= 4) return '*'.repeat(str.length);
   const prefix = str.slice(0, 4);
   const maskedPart = '*'.repeat(str.length - 4);
   return prefix + maskedPart;
 }
 
-/**
- * Calculates line number from character index offset.
- */
 function lineNumberAt(code, offset) {
+  if (typeof code !== 'string' || offset < 0) return 1;
   let line = 1;
   for (let i = 0; i < offset && i < code.length; i++) {
     if (code[i] === '\n') line++;
@@ -56,13 +50,11 @@ function lineNumberAt(code, offset) {
   return line;
 }
 
-/**
- * Replaces matched regex regions with spaces so entropy scan only runs on unmatched tokens.
- */
 function maskMatchedRegions(code, regexMatches) {
+  if (typeof code !== 'string') return '';
   const chars = Array.from(code);
   for (const { start, end } of regexMatches) {
-    if (start !== null && end !== null) {
+    if (start !== null && end !== null && start >= 0) {
       for (let i = start; i < end && i < chars.length; i++) {
         if (chars[i] !== '\n') chars[i] = ' ';
       }
@@ -71,21 +63,16 @@ function maskMatchedRegions(code, regexMatches) {
   return chars.join('');
 }
 
-/**
- * Redacts secrets from code string by replacing each secret's real value
- * with a masked version (keeps first 4 characters, masks the rest with '*').
- */
 function redactSecrets(code, rawMatches = []) {
-  if (!code) return '';
+  if (!code || typeof code !== 'string') return '';
 
   let redacted = code;
-  // Sort by length descending to replace longer secrets first and prevent substring collisions
-  const sortedMatches = [...rawMatches].sort((a, b) => b.rawSecret.length - a.rawSecret.length);
+  const sortedMatches = [...rawMatches]
+    .filter((m) => m && typeof m.rawSecret === 'string' && m.rawSecret.trim().length > 0)
+    .sort((a, b) => b.rawSecret.length - a.rawSecret.length);
 
   for (const match of sortedMatches) {
     const rawValue = match.rawSecret;
-    if (!rawValue) continue;
-
     const masked = maskSecret(rawValue);
     redacted = redacted.split(rawValue).join(masked);
   }
@@ -93,32 +80,35 @@ function redactSecrets(code, rawMatches = []) {
   return redacted;
 }
 
-/**
- * Main VibeGuard Secret Engine export.
- * 
- * @param {string} code - The source code to analyze.
- * @param {string} filename - Path or name of the file being scanned.
- * @returns {{ findings: Array<Object>, redacted_code: string }}
- */
-function secretEngine(code, filename) {
-  if (!code) return { findings: [], redacted_code: '' };
+function secretEngine(codePayload, filename = 'raw_input.js') {
+  // Safe input normalization for raw code payloads & objects
+  let code = codePayload;
+  if (typeof code === 'object' && code !== null) {
+    code = code.code || code.content || JSON.stringify(code, null, 2);
+  }
+  if (typeof code !== 'string') {
+    code = String(code || '');
+  }
+
+  if (!code.trim()) return { findings: [], redacted_code: '' };
 
   const rawMatches = [];
 
-  // 1. Run all patterns from utils/patterns.js
+  // 1. Regex pattern scanning
   for (const { type, regex, description } of patterns) {
+    if (!regex) continue;
     const re = new RegExp(regex.source, regex.flags.includes('g') ? regex.flags : `${regex.flags}g`);
     let match;
     while ((match = re.exec(code)) !== null) {
       const matchedText = match[0];
-      if (matchedText.length === 0) {
+      if (!matchedText || matchedText.length === 0) {
         re.lastIndex++;
         continue;
       }
 
-      // Capture subgroup or full match
       const targetText = match[1] || matchedText;
-      const startIdx = match.index + matchedText.indexOf(targetText);
+      const relativeOffset = matchedText.indexOf(targetText);
+      const startIdx = relativeOffset !== -1 ? match.index + relativeOffset : match.index;
 
       rawMatches.push({
         rule: type,
@@ -135,16 +125,23 @@ function secretEngine(code, filename) {
     }
   }
 
-  // 2. Run findHighEntropyStrings on remaining unmatched tokens
+  // 2. High-entropy scanning on unmasked regions
   const maskedCode = maskMatchedRegions(code, rawMatches);
-  const entropyResults = findHighEntropyStrings(maskedCode);
+  const entropyResults = findHighEntropyStrings(maskedCode) || [];
 
   for (const { token, line, type, entropy } of entropyResults) {
+    if (!token || typeof token !== 'string') continue;
+
+    // Ignore redacted asterisks, placeholders, or UUID-like safe tokens
+    if (/[*]{3,}/.test(token) || token.includes('[REDACTED')) {
+      continue;
+    }
+
     rawMatches.push({
       rule: `high_entropy_${type}`,
       title: 'High Entropy String Detected',
       message: 'A high-entropy string was identified, indicating a potential zero-day or unclassified secret/token.',
-      line: line,
+      line: line || 1,
       rawSecret: token,
       fullMatch: token,
       start: null,
@@ -155,7 +152,7 @@ function secretEngine(code, filename) {
     });
   }
 
-  // 3. Deduplicate overlapping and identical matches
+  // 3. Deduplicate overlapping matches
   const seen = new Set();
   const dedupedMatches = [];
 
@@ -166,10 +163,10 @@ function secretEngine(code, filename) {
     dedupedMatches.push(item);
   }
 
-  // 4. Perform redaction on the raw code
+  // 4. Perform redaction
   const redacted_code = redactSecrets(code, dedupedMatches);
 
-  // 5. Format findings into strict VibeGuard JSON Schema (RAW SECRETS STRIPPED)
+  // 5. Format schema
   const findings = dedupedMatches.map((match) => {
     const isCritical = match.confidence >= 0.85;
 
@@ -179,12 +176,12 @@ function secretEngine(code, filename) {
       severity: isCritical ? 'CRITICAL' : 'HIGH',
       title: match.title,
       message: match.message,
-      file: filename, // Strictly set to filename parameter
+      file: filename,
       line: match.line,
       rule: match.rule,
-      source: 'secretEngine', // Hardcoded as required
+      source: 'secretEngine',
       confidence: match.confidence,
-      evidence: maskSecret(match.rawSecret), // Masked value only
+      evidence: maskSecret(match.rawSecret),
       suggestion: 'Remove raw secrets from source code and migrate them to an environment variable or secret manager.',
       understanding_required: true,
       understanding_confirmed: false,
