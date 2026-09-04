@@ -29,10 +29,12 @@ VibeGuard runs three independent detection engines over a codebase and combines 
 
 Findings from all three engines are merged, scored, and returned as a single scan object — including a severity breakdown and a "confirm understanding" flag on high-risk findings, so flagged issues can't be silently dismissed.
 
+VibeGuard is available as a **CLI**, a **web dashboard**, and a **browser extension**.
+
 ## How It Works
 
 ```
-                          index.js
+                        backend/src/index.js
                              │
       ┌──────────────────────┼──────────────────────┐
       ▼                      ▼                       ▼
@@ -52,41 +54,75 @@ Findings from all three engines are merged, scored, and returned as a single sca
                              ▼
                 return final scan object
                              ▼
-                        Frontend
-              (scorecard + "confirm understanding" UI)
+              ┌──────────────┼──────────────┐
+              ▼              ▼              ▼
+            CLI          Dashboard       Extension
+      (vibeguard-cli.js)  (Next.js)      (popup.js)
 ```
 
-Every engine returns findings in a shared JSON contract, so the frontend consumes one consistent object regardless of which engine flagged what.
+Every engine returns findings in a shared JSON contract, so every consumer — CLI, dashboard, extension — reads one consistent object regardless of which engine flagged what.
 
 ## Project Structure
 
 ```
 VibeGuard/
 ├── backend/
-│   ├── engines/          # secretEngine.js, semanticEngine.js, registry engine
-│   ├── rules/            # cwe_rules.json — CWE grounding for semantic checks
-│   ├── utils/            # patterns.js, entropy.js, allowlists
-│   ├── cli/commands/     # CLI entry points
-│   ├── docs/             # per-engine documentation
-│   ├── samples/          # clean/ and vulnerable/ test fixtures
-│   └── tests/            # engine test suites
-├── frontend/
-│   └── vibe-guard_WEB9/  # dashboard, scorecard UI
+│   ├── rules/
+│   │   └── cwe_rules.json        # CWE grounding for semantic checks
+│   ├── src/
+│   │   ├── engines/               # secretEngine, semanticEngine, registryEngine
+│   │   ├── rules/                 # rule loading/parsing logic
+│   │   ├── utils/                 # patterns.js, entropy.js, allowlists, etc.
+│   │   └── index.js               # combines engine findings into final scan object
+│   ├── main.py                    # Python-side component (registry/semantic support)
+│   ├── vibeguard-cli.js           # CLI entry point
+│   ├── .env.example.env
+│   └── package.json
+│
+├── frontend/vibe-guard_WEB9/      # Next.js dashboard
+│   ├── app/
+│   │   ├── history/                # past scan history view
+│   │   ├── results/                # scan results view
+│   │   ├── layout.tsx
+│   │   └── page.tsx
+│   ├── components/
+│   │   ├── ui/                     # base UI components
+│   │   └── vibeguard/               # VibeGuard-specific components
+│   ├── lib/
+│   │   ├── vibeguard/               # frontend-side API/client logic
+│   │   └── utils.ts
+│   ├── public/
+│   └── package.json
+│
+├── vibeguard-extension/           # Browser extension
+│   ├── manifest.json
+│   ├── popup.html
+│   └── popup.js
+│
 ├── tests/
-├── contract.json         # shared JSON schema all engines must output
-└── package.json
+│   ├── secret.test.js
+│   └── semantic.test.js
+│
+├── LICENSE
+├── package.json
+├── pnpm-lock.yaml
+├── pnpm-workspace.yaml
+└── README.md
 ```
 
 ## Tech Stack
 
-- **Backend:** Node.js
+- **Backend:** Node.js, Python
 - **Secret Detection:** Regex pattern matching + Shannon entropy analysis
-- **Semantic Analysis:** Gemini Flash API, grounded via JSON schema + CWE rule set
+- **Semantic Analysis:** Gemini Flash API, grounded via JSON schema + CWE rule set (`cwe_rules.json`)
 - **Registry Validation:** npm/PyPI REST APIs, AST parsing (`@babel/parser`)
-- **Frontend:** Next.js / Tailwind
+- **Frontend:** Next.js, TypeScript, Tailwind
+- **Browser Extension:** Chrome Extension (Manifest-based)
 - **Package Management:** pnpm (workspace monorepo)
 
 ## Getting Started
+
+### 1. Clone & install
 
 ```bash
 git clone https://github.com/Qypher365/VibeGuard.git
@@ -94,18 +130,40 @@ cd VibeGuard
 pnpm install
 ```
 
-Run the scanner against a file or directory:
+### 2. Set up environment variables
+
+```bash
+cd backend
+cp .env.example.env .env
+# fill in your API keys (e.g. Gemini Flash API key)
+```
+
+### 3. Run the scanner (CLI)
 
 ```bash
 # from backend/
-node cli/commands/scan.js <path-to-code>
+node vibeguard-cli.js <path-to-code>
 ```
 
-Run the frontend dashboard:
+### 4. Run the dashboard
 
 ```bash
 cd frontend/vibe-guard_WEB9
 pnpm dev
+```
+
+### 5. Load the browser extension
+
+1. Go to `chrome://extensions`
+2. Enable **Developer mode**
+3. Click **Load unpacked** and select the `vibeguard-extension/` folder
+
+## Testing
+
+```bash
+# from repo root
+node tests/secret.test.js
+node tests/semantic.test.js
 ```
 
 ## Team
